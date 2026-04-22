@@ -1,6 +1,5 @@
 // 全局变量
 let requestStartTime = 0;
-let currentResponse = null;
 const historyList = [];
 const MAX_HISTORY = 10;
 
@@ -29,31 +28,25 @@ function initEventListeners() {
 
 // 发送 POST 请求
 async function sendPostRequest() {
+    const protocol = document.getElementById('protocol').value;
     const urlInput = document.getElementById('url');
     const jsonInput = document.getElementById('jsonData');
     const sendBtn = document.getElementById('sendBtn');
     const btnText = sendBtn.querySelector('.btn-text');
     const spinner = sendBtn.querySelector('.loading-spinner');
     
-    // 验证并处理 URL
-    let originalUrl = urlInput.value.trim();
-    if (!originalUrl) {
-        alert('请输入目标 URL');
+    // 构建完整 URL
+    let hostPath = urlInput.value.trim();
+    if (!hostPath) {
+        alert('请输入目标地址');
         return;
     }
     
-    // 自动添加协议
-    if (!originalUrl.startsWith('http://') && !originalUrl.startsWith('https://')) {
-        originalUrl = 'https://' + originalUrl;
-    }
+    // 移除用户可能误输入的协议前缀
+    hostPath = hostPath.replace(/^https?:\/\//, '');
     
-    // 强制升级为 HTTPS（避免 Mixed Content）
-    let finalUrl = originalUrl;
-    if (originalUrl.startsWith('http://')) {
-        finalUrl = originalUrl.replace('http://', 'https://');
-        urlInput.value = finalUrl;
-        console.warn('⚠️ 已将 HTTP 自动升级为 HTTPS，避免混合内容错误');
-    }
+    const finalUrl = protocol + hostPath;
+    urlInput.value = hostPath; // 保持输入框干净
     
     // 验证 JSON
     let jsonData;
@@ -64,18 +57,10 @@ async function sendPostRequest() {
         return;
     }
     
-    // 获取自定义请求头
-    const customHeaders = {
+    // 固定请求头
+    const headers = {
         'Content-Type': 'application/json'
     };
-    
-    document.querySelectorAll('.header-row:not(:first-child)').forEach(row => {
-        const key = row.querySelector('.header-key')?.value.trim();
-        const value = row.querySelector('.header-value')?.value.trim();
-        if (key && value) {
-            customHeaders[key] = value;
-        }
-    });
     
     // UI 更新
     sendBtn.disabled = true;
@@ -88,16 +73,14 @@ async function sendPostRequest() {
     requestStartTime = performance.now();
     
     try {
-        let response, requestUrl;
+        let response;
         
         if (USE_WORKER_PROXY) {
-            // ========== 通过 Worker 代理发送请求 ==========
-            requestUrl = PROXY_PATH;
-            
+            // 通过 Worker 代理发送请求
             const proxyBody = {
                 targetUrl: finalUrl,
                 data: jsonData,
-                headers: customHeaders
+                headers: headers
             };
             
             response = await fetch(PROXY_PATH, {
@@ -109,12 +92,10 @@ async function sendPostRequest() {
             });
             
         } else {
-            // ========== 直接发送请求 ==========
-            requestUrl = finalUrl;
-            
+            // 直接发送请求
             response = await fetch(finalUrl, {
                 method: 'POST',
-                headers: customHeaders,
+                headers: headers,
                 body: JSON.stringify(jsonData)
             });
         }
@@ -154,8 +135,7 @@ async function sendPostRequest() {
             method: 'POST',
             status: response.status,
             time: requestTime,
-            timestamp: new Date().toLocaleString(),
-            proxied: USE_WORKER_PROXY
+            timestamp: new Date().toLocaleString()
         });
         
         // 更新状态
@@ -169,15 +149,8 @@ async function sendPostRequest() {
         
         let errorMessage = error.message;
         
-        // 提供更友好的错误提示
         if (errorMessage.includes('Failed to fetch')) {
-            if (!USE_WORKER_PROXY) {
-                errorMessage = '请求失败：可能是 CORS 跨域问题。建议启用 Worker 代理（将 USE_WORKER_PROXY 设为 true）';
-            } else {
-                errorMessage = '代理请求失败：请检查 _worker.js 是否正确部署';
-            }
-        } else if (errorMessage.includes('NetworkError')) {
-            errorMessage = '网络错误：无法连接到目标服务器';
+            errorMessage = '请求失败：可能是 CORS 跨域问题或网络错误';
         }
         
         displayError({
@@ -194,8 +167,7 @@ async function sendPostRequest() {
             status: 'Error',
             time: requestTime,
             timestamp: new Date().toLocaleString(),
-            error: errorMessage,
-            proxied: USE_WORKER_PROXY
+            error: errorMessage
         });
         
     } finally {
@@ -208,7 +180,6 @@ async function sendPostRequest() {
 
 // 显示响应数据
 function displayResponse(data) {
-    // 响应体
     const bodyTab = document.getElementById('responseBody');
     if (data.isJSON) {
         bodyTab.textContent = JSON.stringify(data.body, null, 2);
@@ -216,7 +187,6 @@ function displayResponse(data) {
         bodyTab.textContent = data.body;
     }
     
-    // 响应头
     const headersTab = document.getElementById('responseHeaders');
     let headersText = '';
     data.headers.forEach((value, key) => {
@@ -224,7 +194,6 @@ function displayResponse(data) {
     });
     headersTab.textContent = headersText || '无响应头信息';
     
-    // 耗时信息
     document.getElementById('requestTime').textContent = data.time + ' ms';
     document.getElementById('responseSize').textContent = data.size;
     document.getElementById('statusCode').textContent = data.status;
@@ -310,19 +279,6 @@ function switchTab(e) {
     document.getElementById(tabName + 'Tab').classList.add('active');
 }
 
-// 添加自定义请求头行
-function addHeaderRow() {
-    const container = document.getElementById('customHeaders');
-    const newRow = document.createElement('div');
-    newRow.className = 'header-row';
-    newRow.innerHTML = `
-        <input type="text" placeholder="Header 名称" class="header-key">
-        <input type="text" placeholder="Header 值" class="header-value">
-        <button type="button" class="btn-icon" onclick="this.parentElement.remove()">➖</button>
-    `;
-    container.appendChild(newRow);
-}
-
 // 保存到历史记录
 function saveToHistory(item) {
     historyList.unshift(item);
@@ -348,8 +304,6 @@ function renderHistory() {
         const statusClass = item.status >= 200 && item.status < 300 ? 'success' : 
                            (item.status === 'Error' ? 'error' : 'pending');
         
-        const proxyBadge = item.proxied ? '🔀 代理' : '🌐 直连';
-        
         html += `
             <div class="history-item" onclick="loadHistoryItem(${index})">
                 <div class="history-url">${item.method} ${item.url}</div>
@@ -358,7 +312,6 @@ function renderHistory() {
                         ${item.status === 'Error' ? '❌ 错误' : '状态: ' + item.status}
                     </span>
                     <span>⏱️ ${item.time}ms</span>
-                    <span>${proxyBadge}</span>
                     <span>🕐 ${item.timestamp}</span>
                 </div>
             </div>
@@ -373,7 +326,11 @@ function loadHistoryItem(index) {
     const item = historyList[index];
     if (!item) return;
     
-    document.getElementById('url').value = item.url;
+    // 解析 URL 恢复协议和主机
+    const urlObj = new URL(item.url);
+    document.getElementById('protocol').value = urlObj.protocol;
+    document.getElementById('url').value = urlObj.host + urlObj.pathname;
+    
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -401,5 +358,4 @@ function formatBytes(bytes) {
 }
 
 // 导出函数到全局作用域
-window.addHeaderRow = addHeaderRow;
 window.loadHistoryItem = loadHistoryItem;
