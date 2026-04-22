@@ -3,9 +3,11 @@ let requestStartTime = 0;
 const historyList = [];
 const MAX_HISTORY = 10;
 
-// 是否使用 Worker 代理（如果你保留了 _worker.js 就设为 true）
-const USE_WORKER_PROXY = true;
-const PROXY_PATH = '/proxy';
+// ========== 配置区 ==========
+// 使用公共 CORS 代理（解决 HTTPS 页面请求 HTTP 接口的 Mixed Content 问题）
+const USE_PUBLIC_PROXY = true;
+const PROXY_URL = 'https://corsproxy.io/?';
+// ===========================
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -57,7 +59,7 @@ async function sendPostRequest() {
         return;
     }
     
-    // 固定请求头
+    // 请求头
     const headers = {
         'Content-Type': 'application/json'
     };
@@ -74,25 +76,23 @@ async function sendPostRequest() {
     
     try {
         let response;
+        let actualRequestUrl;
         
-        if (USE_WORKER_PROXY) {
-            // 通过 Worker 代理发送请求
-            const proxyBody = {
-                targetUrl: finalUrl,
-                data: jsonData,
-                headers: headers
-            };
+        if (USE_PUBLIC_PROXY) {
+            // 通过公共 CORS 代理发送请求
+            actualRequestUrl = PROXY_URL + encodeURIComponent(finalUrl);
+            console.log('🔀 通过代理请求:', actualRequestUrl);
             
-            response = await fetch(PROXY_PATH, {
+            response = await fetch(actualRequestUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(proxyBody)
+                headers: headers,
+                body: JSON.stringify(jsonData)
             });
-            
         } else {
-            // 直接发送请求
+            // 直接发送请求（仅适用于 HTTPS 或同源）
+            actualRequestUrl = finalUrl;
+            console.log('🌐 直接请求:', actualRequestUrl);
+            
             response = await fetch(finalUrl, {
                 method: 'POST',
                 headers: headers,
@@ -135,7 +135,8 @@ async function sendPostRequest() {
             method: 'POST',
             status: response.status,
             time: requestTime,
-            timestamp: new Date().toLocaleString()
+            timestamp: new Date().toLocaleString(),
+            proxied: USE_PUBLIC_PROXY
         });
         
         // 更新状态
@@ -150,7 +151,7 @@ async function sendPostRequest() {
         let errorMessage = error.message;
         
         if (errorMessage.includes('Failed to fetch')) {
-            errorMessage = '请求失败：可能是 CORS 跨域问题或网络错误';
+            errorMessage = '请求失败：网络错误或 CORS 跨域问题';
         }
         
         displayError({
@@ -167,7 +168,8 @@ async function sendPostRequest() {
             status: 'Error',
             time: requestTime,
             timestamp: new Date().toLocaleString(),
-            error: errorMessage
+            error: errorMessage,
+            proxied: USE_PUBLIC_PROXY
         });
         
     } finally {
@@ -304,6 +306,8 @@ function renderHistory() {
         const statusClass = item.status >= 200 && item.status < 300 ? 'success' : 
                            (item.status === 'Error' ? 'error' : 'pending');
         
+        const proxyBadge = item.proxied ? '🔀 代理' : '🌐 直连';
+        
         html += `
             <div class="history-item" onclick="loadHistoryItem(${index})">
                 <div class="history-url">${item.method} ${item.url}</div>
@@ -312,6 +316,7 @@ function renderHistory() {
                         ${item.status === 'Error' ? '❌ 错误' : '状态: ' + item.status}
                     </span>
                     <span>⏱️ ${item.time}ms</span>
+                    <span>${proxyBadge}</span>
                     <span>🕐 ${item.timestamp}</span>
                 </div>
             </div>
@@ -327,9 +332,14 @@ function loadHistoryItem(index) {
     if (!item) return;
     
     // 解析 URL 恢复协议和主机
-    const urlObj = new URL(item.url);
-    document.getElementById('protocol').value = urlObj.protocol;
-    document.getElementById('url').value = urlObj.host + urlObj.pathname;
+    try {
+        const urlObj = new URL(item.url);
+        document.getElementById('protocol').value = urlObj.protocol;
+        document.getElementById('url').value = urlObj.host + urlObj.pathname;
+    } catch (e) {
+        // 如果解析失败，只填主机部分
+        document.getElementById('url').value = item.url.replace(/^https?:\/\//, '');
+    }
     
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
