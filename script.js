@@ -4,6 +4,10 @@ let currentResponse = null;
 const historyList = [];
 const MAX_HISTORY = 10;
 
+// 是否使用 Worker 代理（如果你保留了 _worker.js 就设为 true）
+const USE_WORKER_PROXY = true;
+const PROXY_PATH = '/proxy';
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
     initEventListeners();
@@ -12,21 +16,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // 初始化事件监听
 function initEventListeners() {
-    // 发送按钮
     document.getElementById('sendBtn').addEventListener('click', sendPostRequest);
-    
-    // 清空按钮
     document.getElementById('clearBtn').addEventListener('click', clearResponse);
-    
-    // 格式化 JSON 按钮
     document.getElementById('formatBtn').addEventListener('click', formatJSON);
     
-    // Tab 切换
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', switchTab);
     });
     
-    // JSON 输入框实时验证
     document.getElementById('jsonData').addEventListener('input', validateJSON);
 }
 
@@ -38,17 +35,24 @@ async function sendPostRequest() {
     const btnText = sendBtn.querySelector('.btn-text');
     const spinner = sendBtn.querySelector('.loading-spinner');
     
-    // 验证 URL
-    let url = urlInput.value.trim();
-    if (!url) {
+    // 验证并处理 URL
+    let originalUrl = urlInput.value.trim();
+    if (!originalUrl) {
         alert('请输入目标 URL');
         return;
     }
     
     // 自动添加协议
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://' + url;
-        urlInput.value = url;
+    if (!originalUrl.startsWith('http://') && !originalUrl.startsWith('https://')) {
+        originalUrl = 'https://' + originalUrl;
+    }
+    
+    // 强制升级为 HTTPS（避免 Mixed Content）
+    let finalUrl = originalUrl;
+    if (originalUrl.startsWith('http://')) {
+        finalUrl = originalUrl.replace('http://', 'https://');
+        urlInput.value = finalUrl;
+        console.warn('⚠️ 已将 HTTP 自动升级为 HTTPS，避免混合内容错误');
     }
     
     // 验证 JSON
@@ -61,7 +65,7 @@ async function sendPostRequest() {
     }
     
     // 获取自定义请求头
-    const headers = {
+    const customHeaders = {
         'Content-Type': 'application/json'
     };
     
@@ -69,7 +73,7 @@ async function sendPostRequest() {
         const key = row.querySelector('.header-key')?.value.trim();
         const value = row.querySelector('.header-value')?.value.trim();
         if (key && value) {
-            headers[key] = value;
+            customHeaders[key] = value;
         }
     });
     
@@ -78,20 +82,42 @@ async function sendPostRequest() {
     btnText.style.display = 'none';
     spinner.style.display = 'inline';
     document.getElementById('jsonError').textContent = '';
-    
-    // 更新状态标签
     updateStatusBadge('pending', '请求中...');
     
     // 记录开始时间
     requestStartTime = performance.now();
     
     try {
-        // 发送请求
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(jsonData)
-        });
+        let response, requestUrl;
+        
+        if (USE_WORKER_PROXY) {
+            // ========== 通过 Worker 代理发送请求 ==========
+            requestUrl = PROXY_PATH;
+            
+            const proxyBody = {
+                targetUrl: finalUrl,
+                data: jsonData,
+                headers: customHeaders
+            };
+            
+            response = await fetch(PROXY_PATH, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(proxyBody)
+            });
+            
+        } else {
+            // ========== 直接发送请求 ==========
+            requestUrl = finalUrl;
+            
+            response = await fetch(finalUrl, {
+                method: 'POST',
+                headers: customHeaders,
+                body: JSON.stringify(jsonData)
+            });
+        }
         
         const endTime = performance.now();
         const requestTime = (endTime - requestStartTime).toFixed(2);
@@ -124,11 +150,12 @@ async function sendPostRequest() {
         
         // 保存到历史
         saveToHistory({
-            url: url,
+            url: finalUrl,
             method: 'POST',
             status: response.status,
             time: requestTime,
-            timestamp: new Date().toLocaleString()
+            timestamp: new Date().toLocaleString(),
+            proxied: USE_WORKER_PROXY
         });
         
         // 更新状态
@@ -140,8 +167,21 @@ async function sendPostRequest() {
         const endTime = performance.now();
         const requestTime = (endTime - requestStartTime).toFixed(2);
         
+        let errorMessage = error.message;
+        
+        // 提供更友好的错误提示
+        if (errorMessage.includes('Failed to fetch')) {
+            if (!USE_WORKER_PROXY) {
+                errorMessage = '请求失败：可能是 CORS 跨域问题。建议启用 Worker 代理（将 USE_WORKER_PROXY 设为 true）';
+            } else {
+                errorMessage = '代理请求失败：请检查 _worker.js 是否正确部署';
+            }
+        } else if (errorMessage.includes('NetworkError')) {
+            errorMessage = '网络错误：无法连接到目标服务器';
+        }
+        
         displayError({
-            message: error.message,
+            message: errorMessage,
             time: requestTime
         });
         
@@ -149,12 +189,13 @@ async function sendPostRequest() {
         
         // 保存错误历史
         saveToHistory({
-            url: url,
+            url: finalUrl,
             method: 'POST',
             status: 'Error',
             time: requestTime,
             timestamp: new Date().toLocaleString(),
-            error: error.message
+            error: errorMessage,
+            proxied: USE_WORKER_PROXY
         });
         
     } finally {
@@ -258,13 +299,11 @@ function clearResponse() {
 function switchTab(e) {
     const tabName = e.target.dataset.tab;
     
-    // 更新按钮状态
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.remove('active');
     });
     e.target.classList.add('active');
     
-    // 更新内容显示
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
     });
@@ -291,10 +330,7 @@ function saveToHistory(item) {
         historyList.pop();
     }
     
-    // 更新 UI
     renderHistory();
-    
-    // 保存到 localStorage
     localStorage.setItem('postTestHistory', JSON.stringify(historyList));
 }
 
@@ -312,6 +348,8 @@ function renderHistory() {
         const statusClass = item.status >= 200 && item.status < 300 ? 'success' : 
                            (item.status === 'Error' ? 'error' : 'pending');
         
+        const proxyBadge = item.proxied ? '🔀 代理' : '🌐 直连';
+        
         html += `
             <div class="history-item" onclick="loadHistoryItem(${index})">
                 <div class="history-url">${item.method} ${item.url}</div>
@@ -320,6 +358,7 @@ function renderHistory() {
                         ${item.status === 'Error' ? '❌ 错误' : '状态: ' + item.status}
                     </span>
                     <span>⏱️ ${item.time}ms</span>
+                    <span>${proxyBadge}</span>
                     <span>🕐 ${item.timestamp}</span>
                 </div>
             </div>
@@ -335,8 +374,6 @@ function loadHistoryItem(index) {
     if (!item) return;
     
     document.getElementById('url').value = item.url;
-    
-    // 滚动到顶部
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -363,6 +400,6 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// 导出函数到全局作用域（供 HTML 调用）
+// 导出函数到全局作用域
 window.addHeaderRow = addHeaderRow;
 window.loadHistoryItem = loadHistoryItem;
