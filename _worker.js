@@ -1,4 +1,4 @@
-// Cloudflare Worker - HTTP 强制测试版
+// Cloudflare Worker - 完整模拟版
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -8,42 +8,49 @@ export default {
       try {
         const { targetUrl, data, headers } = await request.json();
         
-        // 强制将目标 URL 改为 HTTP（无论前端传的是什么）
-        let httpUrl = targetUrl;
-        if (httpUrl.startsWith('https://')) {
-          httpUrl = httpUrl.replace('https://', 'http://');
-        }
+        // 解析目标 URL
+        const targetUrlObj = new URL(targetUrl);
         
-        console.log('实际请求地址:', httpUrl);
+        // 构建转发请求的头部，尽可能模拟原始请求
+        const forwardHeaders = {
+          'Content-Type': 'application/json',
+          'Host': targetUrlObj.host,  // 关键：设置正确的 Host 头
+          'Accept': '*/*',
+          'User-Agent': 'PostTester/1.0',
+          ...headers
+        };
         
-        // 发送 HTTP 请求，阻止自动重定向
-        const response = await fetch(httpUrl, {
+        // 删除可能干扰的头部
+        delete forwardHeaders['origin'];
+        delete forwardHeaders['referer'];
+        
+        console.log('转发到:', targetUrl);
+        console.log('请求头:', JSON.stringify(forwardHeaders));
+        
+        // 发送请求
+        const response = await fetch(targetUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...headers
-          },
+          headers: forwardHeaders,
           body: JSON.stringify(data),
-          redirect: 'manual'  // 不跟随重定向
+          redirect: 'manual'
         });
         
         const responseText = await response.text();
         
-        // 获取响应头信息
+        // 获取响应头
         const responseHeaders = {};
         response.headers.forEach((value, key) => {
           responseHeaders[key] = value;
         });
         
-        // 返回完整信息（包括状态码和响应头）
+        // 返回响应
         return new Response(responseText, {
           status: response.status,
           statusText: response.statusText,
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': response.headers.get('Content-Type') || 'application/json',
             'Access-Control-Allow-Origin': '*',
-            'X-Original-Status': response.status.toString(),
-            'X-Redirect-Location': responseHeaders['location'] || ''
+            'Access-Control-Expose-Headers': '*'
           }
         });
         
