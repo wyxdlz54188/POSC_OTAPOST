@@ -4,7 +4,7 @@ const historyList = [];
 const MAX_HISTORY = 10;
 
 // 是否使用 Worker 代理（如果你保留了 _worker.js 就设为 true）
-const USE_WORKER_PROXY = true;
+const USE_WORKER_PROXY = false;
 const PROXY_PATH = '/proxy';
 
 // 页面加载完成后初始化
