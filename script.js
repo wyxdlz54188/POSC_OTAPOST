@@ -1,18 +1,18 @@
 // 全局变量
 let requestStartTime = 0;
 const historyList = [];
-const MAX_HISTORY = 10;
+const MAX_HISTORY = 20;
 
 // ========== 配置区 ==========
-// 使用公共 CORS 代理（解决 HTTPS 页面请求 HTTP 接口的 Mixed Content 问题）
-const USE_PUBLIC_PROXY = false;
-const PROXY_URL = 'https://cors-anywhere.herokuapp.com/';
+const USE_WORKER_PROXY = true;
+const PROXY_PATH = '/proxy';
 // ===========================
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
     initEventListeners();
     loadHistoryFromStorage();
+    loadSavedInputs();  // 恢复保存的输入内容
 });
 
 // 初始化事件监听
@@ -20,12 +20,22 @@ function initEventListeners() {
     document.getElementById('sendBtn').addEventListener('click', sendPostRequest);
     document.getElementById('clearBtn').addEventListener('click', clearResponse);
     document.getElementById('formatBtn').addEventListener('click', formatJSON);
+    document.getElementById('clearHistoryBtn').addEventListener('click', clearHistory);
     
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', switchTab);
     });
     
-    document.getElementById('jsonData').addEventListener('input', validateJSON);
+    document.getElementById('jsonData').addEventListener('input', function() {
+        validateJSON();
+        saveInputs();  // 输入时自动保存
+    });
+    
+    document.getElementById('url').addEventListener('input', saveInputs);
+    document.getElementById('protocol').addEventListener('change', saveInputs);
+    
+    // 初始验证
+    validateJSON();
 }
 
 // 发送 POST 请求
@@ -37,20 +47,15 @@ async function sendPostRequest() {
     const btnText = sendBtn.querySelector('.btn-text');
     const spinner = sendBtn.querySelector('.loading-spinner');
     
-    // 构建完整 URL
     let hostPath = urlInput.value.trim();
     if (!hostPath) {
         alert('请输入目标地址');
         return;
     }
     
-    // 移除用户可能误输入的协议前缀
     hostPath = hostPath.replace(/^https?:\/\//, '');
-    
     const finalUrl = protocol + hostPath;
-    urlInput.value = hostPath; // 保持输入框干净
     
-    // 验证 JSON
     let jsonData;
     try {
         jsonData = JSON.parse(jsonInput.value);
@@ -59,43 +64,30 @@ async function sendPostRequest() {
         return;
     }
     
-    // 请求头
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-    
-    // UI 更新
     sendBtn.disabled = true;
     btnText.style.display = 'none';
     spinner.style.display = 'inline';
     document.getElementById('jsonError').textContent = '';
     updateStatusBadge('pending', '请求中...');
     
-    // 记录开始时间
     requestStartTime = performance.now();
     
     try {
         let response;
-        let actualRequestUrl;
         
-        if (USE_PUBLIC_PROXY) {
-            // 通过公共 CORS 代理发送请求
-            actualRequestUrl = PROXY_URL + encodeURIComponent(finalUrl);
-            console.log('🔀 通过代理请求:', actualRequestUrl);
-            
-            response = await fetch(actualRequestUrl, {
+        if (USE_WORKER_PROXY) {
+            response = await fetch(PROXY_PATH, {
                 method: 'POST',
-                headers: headers,
-                body: JSON.stringify(jsonData)
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    targetUrl: finalUrl,
+                    data: jsonData
+                })
             });
         } else {
-            // 直接发送请求（仅适用于 HTTPS 或同源）
-            actualRequestUrl = finalUrl;
-            console.log('🌐 直接请求:', actualRequestUrl);
-            
             response = await fetch(finalUrl, {
                 method: 'POST',
-                headers: headers,
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(jsonData)
             });
         }
@@ -103,7 +95,6 @@ async function sendPostRequest() {
         const endTime = performance.now();
         const requestTime = (endTime - requestStartTime).toFixed(2);
         
-        // 获取响应数据
         const responseText = await response.text();
         let responseData;
         let isJSON = false;
@@ -115,10 +106,8 @@ async function sendPostRequest() {
             responseData = responseText;
         }
         
-        // 计算响应大小
         const responseSize = new Blob([responseText]).size;
         
-        // 显示响应
         displayResponse({
             status: response.status,
             statusText: response.statusText,
@@ -129,39 +118,34 @@ async function sendPostRequest() {
             size: formatBytes(responseSize)
         });
         
-        // 保存到历史
         saveToHistory({
             url: finalUrl,
             method: 'POST',
             status: response.status,
             time: requestTime,
             timestamp: new Date().toLocaleString(),
-            proxied: USE_PUBLIC_PROXY
+            proxied: USE_WORKER_PROXY,
+            jsonData: jsonInput.value
         });
         
-        // 更新状态
         updateStatusBadge(response.ok ? 'success' : 'error', 
-                         `${response.status} ${response.statusText}`);
+                         response.status + ' ' + response.statusText);
+        
+        // 保存输入内容
+        saveInputs();
         
     } catch (error) {
-        // 错误处理
         const endTime = performance.now();
         const requestTime = (endTime - requestStartTime).toFixed(2);
         
         let errorMessage = error.message;
-        
         if (errorMessage.includes('Failed to fetch')) {
             errorMessage = '请求失败：网络错误或 CORS 跨域问题';
         }
         
-        displayError({
-            message: errorMessage,
-            time: requestTime
-        });
-        
+        displayError({ message: errorMessage, time: requestTime });
         updateStatusBadge('error', '请求失败');
         
-        // 保存错误历史
         saveToHistory({
             url: finalUrl,
             method: 'POST',
@@ -169,14 +153,39 @@ async function sendPostRequest() {
             time: requestTime,
             timestamp: new Date().toLocaleString(),
             error: errorMessage,
-            proxied: USE_PUBLIC_PROXY
+            proxied: USE_WORKER_PROXY,
+            jsonData: jsonInput.value
         });
         
     } finally {
-        // 恢复 UI
         sendBtn.disabled = false;
         btnText.style.display = 'inline';
         spinner.style.display = 'none';
+    }
+}
+
+// 保存输入内容到 localStorage
+function saveInputs() {
+    const data = {
+        protocol: document.getElementById('protocol').value,
+        url: document.getElementById('url').value,
+        jsonData: document.getElementById('jsonData').value
+    };
+    localStorage.setItem('postTestInputs', JSON.stringify(data));
+}
+
+// 从 localStorage 恢复输入内容
+function loadSavedInputs() {
+    const saved = localStorage.getItem('postTestInputs');
+    if (saved) {
+        try {
+            const data = JSON.parse(saved);
+            if (data.protocol) document.getElementById('protocol').value = data.protocol;
+            if (data.url) document.getElementById('url').value = data.url;
+            if (data.jsonData) document.getElementById('jsonData').value = data.jsonData;
+        } catch (e) {
+            console.error('恢复输入内容失败:', e);
+        }
     }
 }
 
@@ -192,7 +201,7 @@ function displayResponse(data) {
     const headersTab = document.getElementById('responseHeaders');
     let headersText = '';
     data.headers.forEach((value, key) => {
-        headersText += `${key}: ${value}\n`;
+        headersText += key + ': ' + value + '\n';
     });
     headersTab.textContent = headersText || '无响应头信息';
     
@@ -203,7 +212,7 @@ function displayResponse(data) {
 
 // 显示错误
 function displayError(error) {
-    document.getElementById('responseBody').textContent = `请求错误: ${error.message}`;
+    document.getElementById('responseBody').textContent = '请求错误: ' + error.message;
     document.getElementById('responseHeaders').textContent = '无响应头信息';
     document.getElementById('requestTime').textContent = error.time + ' ms';
     document.getElementById('responseSize').textContent = '-';
@@ -234,6 +243,11 @@ function validateJSON() {
     const jsonInput = document.getElementById('jsonData');
     const errorEl = document.getElementById('jsonError');
     
+    if (!jsonInput.value.trim()) {
+        errorEl.textContent = '';
+        return;
+    }
+    
     try {
         JSON.parse(jsonInput.value);
         errorEl.textContent = '✅ JSON 格式正确';
@@ -251,6 +265,7 @@ function formatJSON() {
         const parsed = JSON.parse(jsonInput.value);
         jsonInput.value = JSON.stringify(parsed, null, 2);
         validateJSON();
+        saveInputs();
     } catch (e) {
         alert('JSON 格式错误，无法格式化');
     }
@@ -331,17 +346,31 @@ function loadHistoryItem(index) {
     const item = historyList[index];
     if (!item) return;
     
-    // 解析 URL 恢复协议和主机
     try {
         const urlObj = new URL(item.url);
         document.getElementById('protocol').value = urlObj.protocol;
         document.getElementById('url').value = urlObj.host + urlObj.pathname;
     } catch (e) {
-        // 如果解析失败，只填主机部分
         document.getElementById('url').value = item.url.replace(/^https?:\/\//, '');
     }
     
+    // 恢复 JSON 数据
+    if (item.jsonData) {
+        document.getElementById('jsonData').value = item.jsonData;
+        validateJSON();
+    }
+    
+    saveInputs();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// 清空历史记录
+function clearHistory() {
+    if (confirm('确定要清空所有历史记录吗？')) {
+        historyList.length = 0;
+        localStorage.removeItem('postTestHistory');
+        renderHistory();
+    }
 }
 
 // 从 localStorage 加载历史
