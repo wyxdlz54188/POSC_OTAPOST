@@ -5,7 +5,7 @@ const MAX_HISTORY = 10;
 
 // ========== 配置区 ==========
 // 使用公共 CORS 代理（解决 HTTPS 页面请求 HTTP 接口的 Mixed Content 问题）
-const USE_PUBLIC_PROXY = true;
+const USE_PUBLIC_PROXY = false;
 const PROXY_URL = 'https://cors-anywhere.herokuapp.com/';
 // ===========================
 
