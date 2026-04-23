@@ -1,92 +1,82 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-cn">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POST 测试工具</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HTTP POST 测试工具</title>
+    <!-- 直接沿用你提供的 sojson 核心样式 -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>🚀 POST 请求测试站</h1>
-        <p class="subtitle">输入目标网址和 JSON 数据，测试 POST 接口响应</p>
-        
-        <div class="card">
-            <div class="form-group">
-                <label for="url">🌐 目标 URL</label>
-                <div class="url-input-group">
+    <div id="so_box" class="layout-container">
+        <div class="layui-row pt10 layui-form">
+            <!-- 第一行：协议 + 网址 + 发送按钮 -->
+            <div class="layui-form-item">
+                <div class="url-group">
                     <select id="protocol" class="protocol-select">
-                        <option value="https://">https://</option>
-                        <option value="http://">http://</option>
+                        <option value="https://">HTTPS://</option>
+                        <option value="http://">HTTP://</option>
                     </select>
-                    <input type="text" id="url" placeholder="example.com/api/endpoint" required>
+                    <input type="text" id="url" class="url-input" placeholder="请输入地址 如：www.sojson.com" autocomplete="off">
+                    <button class="layui-btn" id="sendBtn">
+                        <span class="btn-text">发送 POST 请求</span>
+                        <span class="loading-spinner" style="display:none;">⏳</span>
+                    </button>
                 </div>
-                <small>选择协议后输入域名和路径</small>
             </div>
-            
-            <div class="form-group">
-                <label for="jsonData">📦 JSON 数据</label>
-                <textarea id="jsonData" rows="8" placeholder='{"key": "value"}' required></textarea>
-                <small id="jsonError" class="error"></small>
+
+            <!-- 第二行：JSON 数据输入区 -->
+            <div class="layui-form-item">
+                <div class="json-area">
+                    <textarea id="jsonData" class="layui-textarea" placeholder='{"key": "value"}' rows="6"></textarea>
+                    <div class="button-group">
+                        <button type="button" class="layui-btn layui-btn-primary layui-btn-sm" id="formatBtn">格式化</button>
+                        <button type="button" class="layui-btn layui-btn-primary layui-btn-sm" id="clearBtn">清空响应</button>
+                    </div>
+                    <small id="jsonError" class="error"></small>
+                </div>
             </div>
-            
-            <div class="button-group">
-                <button id="sendBtn" class="btn btn-primary">
-                    <span class="btn-text">发送 POST 请求</span>
-                    <span class="loading-spinner" style="display:none;">⏳</span>
-                </button>
-                <button id="clearBtn" class="btn btn-secondary">清空响应</button>
-                <button id="formatBtn" class="btn btn-secondary">格式化 JSON</button>
-            </div>
-            
-            <div class="response-section">
-                <div class="response-header">
-                    <h3>📥 响应结果</h3>
-                    <span id="statusBadge" class="status-badge"></span>
-                </div>
-                
-                <div class="tabs">
-                    <button class="tab-btn active" data-tab="body">响应体</button>
-                    <button class="tab-btn" data-tab="headers">响应头</button>
-                    <button class="tab-btn" data-tab="timing">耗时信息</button>
-                </div>
-                
-                <div id="bodyTab" class="tab-content active">
-                    <pre id="responseBody" class="response-pre">等待发送请求...</pre>
-                </div>
-                
-                <div id="headersTab" class="tab-content">
-                    <pre id="responseHeaders" class="response-pre"></pre>
-                </div>
-                
-                <div id="timingTab" class="tab-content">
-                    <div class="timing-info">
-                        <div class="timing-item">
-                            <span class="label">请求耗时:</span>
-                            <span id="requestTime">-</span>
+
+            <!-- 第三行：响应结果展示区 -->
+            <div class="layui-form-item">
+                <div class="layui-tab mb0" lay-filter="result-tab">
+                    <ul class="layui-tab-title">
+                        <li class="layui-this" data-tab="body"><h4>Response Body</h4></li>
+                        <li data-tab="headers"><h4>Response Headers</h4></li>
+                        <li data-tab="timing"><h4>耗时信息</h4></li>
+                    </ul>
+                    <div class="layui-tab-content">
+                        <!-- 响应体 -->
+                        <div class="layui-tab-item layui-show" id="bodyTab">
+                            <textarea id="responseBody" class="layui-textarea h300" placeholder="等待发送请求..." readonly></textarea>
                         </div>
-                        <div class="timing-item">
-                            <span class="label">响应大小:</span>
-                            <span id="responseSize">-</span>
+                        <!-- 响应头 -->
+                        <div class="layui-tab-item" id="headersTab">
+                            <textarea id="responseHeaders" class="layui-textarea h300" placeholder="等待发送请求..." readonly></textarea>
                         </div>
-                        <div class="timing-item">
-                            <span class="label">状态码:</span>
-                            <span id="statusCode">-</span>
+                        <!-- 耗时信息 -->
+                        <div class="layui-tab-item" id="timingTab">
+                            <div class="timing-info">
+                                <div class="timing-item"><span class="label">请求耗时:</span><span id="requestTime">-</span></div>
+                                <div class="timing-item"><span class="label">响应大小:</span><span id="responseSize">-</span></div>
+                                <div class="timing-item"><span class="label">状态码:</span><span id="statusCode">-</span></div>
+                            </div>
                         </div>
                     </div>
                 </div>
+                <span id="statusBadge" class="status-badge"></span>
             </div>
-        </div>
-        
-        <div class="history-section">
-            <h3>📜 请求历史</h3>
-            <div id="historyList" class="history-list">
-                <p class="empty-history">暂无历史记录</p>
+
+            <!-- 历史记录 -->
+            <div class="history-section">
+                <h4>📜 请求历史</h4>
+                <div id="historyList" class="history-list">
+                    <p class="empty-history">暂无历史记录</p>
+                </div>
+                <button class="layui-btn layui-btn-primary layui-btn-sm" id="clearHistoryBtn" style="margin-top:10px;">清空历史</button>
             </div>
-            <button id="clearHistoryBtn" class="btn btn-secondary" style="margin-top:12px; width:100%;">清空历史记录</button>
         </div>
     </div>
-    
     <script src="script.js"></script>
 </body>
 </html>
