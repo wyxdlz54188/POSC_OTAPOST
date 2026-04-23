@@ -1,4 +1,3 @@
-// Cloudflare Worker - 完整模拟版
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -6,44 +5,30 @@ export default {
     // 处理 /proxy 路径的请求
     if (url.pathname === '/proxy' && request.method === 'POST') {
       try {
-        const { targetUrl, data, headers } = await request.json();
+        const { targetUrl, data } = await request.json();
         
         // 解析目标 URL
         const targetUrlObj = new URL(targetUrl);
         
-        // 构建转发请求的头部，尽可能模拟原始请求
-        const forwardHeaders = {
+        // 关键：模拟 curl 的请求头，避免被识别为代理
+        const headers = {
           'Content-Type': 'application/json',
-          'Host': targetUrlObj.host,  // 关键：设置正确的 Host 头
+          'Host': targetUrlObj.host,
           'Accept': '*/*',
-          'User-Agent': 'PostTester/1.0',
-          ...headers
+          'User-Agent': 'curl/8.5.0',  // 伪装成 curl
+          'Connection': 'keep-alive'
         };
         
-        // 删除可能干扰的头部
-        delete forwardHeaders['origin'];
-        delete forwardHeaders['referer'];
-        
-        console.log('转发到:', targetUrl);
-        console.log('请求头:', JSON.stringify(forwardHeaders));
-        
-        // 发送请求
+        // 发送请求（直接请求，不走任何代理）
         const response = await fetch(targetUrl, {
           method: 'POST',
-          headers: forwardHeaders,
-          body: JSON.stringify(data),
-          redirect: 'manual'
+          headers: headers,
+          body: JSON.stringify(data)
         });
         
         const responseText = await response.text();
         
-        // 获取响应头
-        const responseHeaders = {};
-        response.headers.forEach((value, key) => {
-          responseHeaders[key] = value;
-        });
-        
-        // 返回响应
+        // 返回响应，添加 CORS 头让浏览器能读取
         return new Response(responseText, {
           status: response.status,
           statusText: response.statusText,
@@ -56,8 +41,7 @@ export default {
         
       } catch (error) {
         return new Response(JSON.stringify({ 
-          error: error.message,
-          stack: error.stack 
+          error: error.message 
         }), {
           status: 500,
           headers: { 
