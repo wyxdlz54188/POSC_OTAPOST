@@ -280,7 +280,7 @@ small {
 }
 
 .history-list {
-    max-height: 200px;
+    max-height: 300px;
     overflow-y: auto;
 }
 
@@ -313,7 +313,8 @@ small {
 
 .history-meta {
     display: flex;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
     font-size: 0.8rem;
     color: #888;
 }
